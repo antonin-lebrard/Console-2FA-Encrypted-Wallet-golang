@@ -21,10 +21,6 @@ import (
 	"time"
 )
 
-func l(s interface{}) {
-	log.Println(s)
-}
-
 // Print() and panic() the message and the error if the error is not nil
 func PanicIfErrorMsg(err error, msg string) {
 	if err != nil {
