@@ -62,9 +62,9 @@ func showHelp() {
 
 type KeyFileContent struct {
 	Filename string
-	Salt []byte
-	Salt2 []byte
-	Content []byte
+	Salt     []byte
+	Salt2    []byte
+	Content  []byte
 }
 
 func getFiles() []KeyFileContent {
@@ -74,7 +74,7 @@ func getFiles() []KeyFileContent {
 	for _, file := range files {
 		if !file.IsDir() {
 			fileContent, err := ioutil.ReadFile("./keys/" + file.Name())
-			PanicIfErrorMsg(err, "cannot read ./keys/" + file.Name() + " file")
+			PanicIfErrorMsg(err, "cannot read ./keys/"+file.Name()+" file")
 			splits := bytes.Split(fileContent, []byte("\n"))
 			salt := splits[0]
 			salt2 := splits[1]
@@ -82,7 +82,7 @@ func getFiles() []KeyFileContent {
 				Filename: file.Name(),
 				Salt:     salt,
 				Salt2:    salt2,
-				Content:  fileContent[len(salt) + len(salt2) + (len("\n") * 2):],
+				Content:  fileContent[len(salt)+len(salt2)+(len("\n")*2):],
 			})
 		}
 	}
@@ -101,34 +101,45 @@ func getPassword() []byte {
 }
 
 func decipherKeys(pass []byte, keyFiles []KeyFileContent, onDecipheredKey func(string, string)) {
+	threadDone := make(chan bool, len(keyFiles))
 	for _, file := range keyFiles {
-		key := pbkdf2.Key(pass, file.Salt, 1000000, 32, crypto.SHA512.New)
-		iv := pbkdf2.Key(pass, file.Salt2, 100000, 16, crypto.SHA512.New)
+		go func(file KeyFileContent) {
+			key := pbkdf2.Key(pass, file.Salt, 1000000, 32, crypto.SHA512.New)
+			iv := pbkdf2.Key(pass, file.Salt2, 100000, 16, crypto.SHA512.New)
 
-		enc, err := hex.DecodeString(string(file.Content))
-		PanicIfErrorMsg(err, "could not decode hex string from file content, is the file content in hex format ?")
-		unenc := make([]byte, len(enc))
+			enc, err := hex.DecodeString(string(file.Content))
+			PanicIfErrorMsg(err, "could not decode hex string from file content, is the file content in hex format ?")
+			unenc := make([]byte, len(enc))
 
-		aes256Block, err := aes.NewCipher(key)
-		PanicIfErrorMsg(err, "could not use crypto lib")
+			aes256Block, err := aes.NewCipher(key)
+			PanicIfErrorMsg(err, "could not use crypto lib")
 
-		aes256CTRStream := cipher.NewCTR(aes256Block, iv)
-		aes256CTRStream.XORKeyStream(unenc, enc)
+			aes256CTRStream := cipher.NewCTR(aes256Block, iv)
+			aes256CTRStream.XORKeyStream(unenc, enc)
 
-		unencString := string(unenc)
-		onDecipheredKey(file.Filename, unencString)
+			unencString := string(unenc)
+			onDecipheredKey(file.Filename, unencString)
+			threadDone <- true
+		}(file)
+	}
+	nbThreadDone := 0
+	for range threadDone {
+		nbThreadDone++
+		if nbThreadDone == len(keyFiles) {
+			break
+		}
 	}
 }
 
-func getOtpObj (from string) (generatingKey string, label string) {
-	return strings.Split(from, " ")[0], from[strings.IndexRune(from, ' ') + 1:]
+func getOtpObj(from string) (generatingKey string, label string) {
+	return strings.Split(from, " ")[0], from[strings.IndexRune(from, ' ')+1:]
 }
 
 func showKeys() {
 	filesContent := getFiles()
 	pass := getPassword()
-    log.Println("")
-	decipherKeys(pass, filesContent, func (filename, unenc string) {
+	fmt.Println("")
+	decipherKeys(pass, filesContent, func(filename, unenc string) {
 		fromKey, label := getOtpObj(unenc)
 		pin, err := totp.GenerateCode(fromKey, time.Now())
 		if err != nil {
@@ -175,12 +186,11 @@ func fileNotExists(filename string) bool {
 }
 func getNextFileName() string {
 	r := nextUIntRand()
-	for !fileNotExists(path.Join("keys", string(r) + ".key")) {
+	for !fileNotExists(path.Join("keys", string(r)+".key")) {
 		r = nextUIntRand()
 	}
-	return path.Join("keys", string(r) + ".key")
+	return path.Join("keys", string(r)+".key")
 }
-
 
 func cipherIntoFile(pass []byte, generatingKey, label string) string {
 	if _, err := totp.GenerateCode(generatingKey, time.Now()); err != nil {
@@ -232,7 +242,7 @@ func changePassword() {
 	newPass := getPassword()
 	filesContent := getFiles()
 	log.Println("might take a while to decipher, and re-cipher")
-	decipherKeys(oldPass, filesContent, func (filename, unenc string) {
+	decipherKeys(oldPass, filesContent, func(filename, unenc string) {
 		generatingKey, label := getOtpObj(unenc)
 		cipherIntoFile(newPass, generatingKey, label)
 	})
