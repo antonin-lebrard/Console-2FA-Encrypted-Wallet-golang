@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"github.com/pquerna/otp/totp"
 	"golang.org/x/crypto/pbkdf2"
+	"golang.org/x/term"
 	"io/ioutil"
 	"log"
 	"math/big"
@@ -90,14 +91,20 @@ func getFiles() []KeyFileContent {
 }
 
 func getPassword() []byte {
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("password: ")
-	password, err := reader.ReadBytes(byte('\n'))
-	PanicIfErrorMsg(err, "cannot read password")
-	if bytes.HasSuffix(password, []byte("\n")) {
+	previousState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	PanicIfErrorMsg(err, "cannot configure terminal to not echo characters")
+	t := term.NewTerminal(os.Stdin, "")
+	password, err := t.ReadPassword("password: ")
+	if err != nil {
+		log.Println("cannot read password")
+		PanicIfErrorMsg(term.Restore(int(os.Stdin.Fd()), previousState), "cannot restore terminal to non-raw mode")
+		panic(err)
+	}
+	PanicIfErrorMsg(term.Restore(int(os.Stdin.Fd()), previousState), "cannot restore terminal to non-raw mode")
+	if strings.HasSuffix(password, "\n") {
 		password = password[:len(password)-1]
 	}
-	return password
+	return []byte(password)
 }
 
 func decipherKeys(pass []byte, keyFiles []KeyFileContent, onDecipheredKey func(string, string)) {
